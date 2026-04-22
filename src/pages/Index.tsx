@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -994,9 +994,16 @@ function TaskCard({
   action?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect?.();
+        }
+      }}
       className={cn(
         "w-full rounded-md border bg-card p-3 text-left shadow-none transition-colors hover:border-primary/35 hover:bg-surface-soft",
         selected ? "border-primary/45 bg-surface-soft" : "border-border/70",
@@ -1051,7 +1058,7 @@ function TaskCard({
         <Progress value={task.progress} className="h-1.5 bg-secondary" />
         <span className="text-xs text-muted-foreground">{task.progress}%</span>
       </div>
-    </button>
+    </div>
   );
 }
 
