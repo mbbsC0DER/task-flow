@@ -19,6 +19,11 @@ export default {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        surface: {
+          strong: "hsl(var(--surface-strong))",
+          soft: "hsl(var(--surface-soft))",
+          panel: "hsl(var(--surface-panel))",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
@@ -57,11 +62,27 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        metric: {
+          emerald: "hsl(var(--metric-emerald))",
+          "emerald-soft": "hsl(var(--metric-emerald-soft))",
+          amber: "hsl(var(--metric-amber))",
+          "amber-soft": "hsl(var(--metric-amber-soft))",
+          red: "hsl(var(--metric-red))",
+          "red-soft": "hsl(var(--metric-red-soft))",
+          blue: "hsl(var(--metric-blue))",
+          "blue-soft": "hsl(var(--metric-blue-soft))",
+          green: "hsl(var(--metric-green))",
+          "green-soft": "hsl(var(--metric-green-soft))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ["IBM Plex Sans", "Segoe UI", "sans-serif"],
+        mono: ["IBM Plex Mono", "monospace"],
       },
       keyframes: {
         "accordion-down": {
