@@ -15,6 +15,7 @@ import {
   FileText,
   Filter,
   Gauge,
+  Home,
   Inbox,
   LayoutGrid,
   ListFilter,
@@ -87,12 +88,14 @@ import {
 } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type Role = "employee" | "manager" | "admin";
 type TaskStatus = "emergency" | "in-progress" | "to-do" | "completed" | "blocked";
 type Priority = "critical" | "high" | "medium" | "low";
 type PageKey =
+  | "home"
   | "today"
   | "weekly"
   | "total"
@@ -175,6 +178,10 @@ const roleLabels: Record<Role, string> = {
 };
 
 const pageCopy: Record<PageKey, { title: string; subtitle: string }> = {
+  home: {
+    title: "Home",
+    subtitle: "Overview of your workspace, team, and key task surfaces.",
+  },
   today: {
     title: "Today's Tasks",
     subtitle: "Run the day from one dense, review-friendly surface.",
@@ -210,7 +217,8 @@ const pageCopy: Record<PageKey, { title: string; subtitle: string }> = {
 };
 
 const navItems: NavItem[] = [
-  { key: "today", title: "Today's Tasks", path: "/", icon: LayoutGrid, roles: ["employee", "manager", "admin"] },
+  { key: "home", title: "Home", path: "/", icon: Home, roles: ["employee", "manager", "admin"] },
+  { key: "today", title: "Today's Tasks", path: "/today", icon: LayoutGrid, roles: ["employee", "manager", "admin"] },
   { key: "weekly", title: "Weekly Tasks", path: "/weekly", icon: CalendarClock, roles: ["employee", "manager", "admin"] },
   { key: "total", title: "Total Tasks", path: "/total", icon: Inbox, roles: ["employee", "manager", "admin"] },
   { key: "meetings", title: "M.O.M", path: "/meetings", icon: MessageSquareText, roles: ["employee", "manager", "admin"], badge: "AI" },
@@ -488,8 +496,9 @@ const metricTone = {
 };
 
 function getPageKey(pathname: string): PageKey {
+  if (pathname.startsWith("/member/")) return "home";
   const match = navItems.find((item) => item.path === pathname);
-  return match?.key ?? "today";
+  return match?.key ?? "home";
 }
 
 function FlowDeskIndex() {
@@ -527,7 +536,7 @@ function FlowDeskIndex() {
   );
 
   useEffect(() => {
-    const allowed = availableNav.some((item) => item.path === location.pathname);
+    const allowed = availableNav.some((item) => item.path === location.pathname) || location.pathname.startsWith("/member/");
     if (!allowed) {
       navigate(availableNav[0]?.path ?? "/", { replace: true });
     }
@@ -558,10 +567,19 @@ function FlowDeskIndex() {
       current.map((task) => (task.id === taskId ? { ...task, week: "This week", status: "in-progress" } : task)),
     );
     setSelectedTaskId(taskId);
-    navigate("/");
+    navigate("/today");
   };
 
   const page = {
+    home: (
+      <HomePage
+        users={users}
+        tasks={tasks}
+        todayTasks={todayTasks}
+        weeklyTasks={weeklyTasks}
+        role={role}
+      />
+    ),
     today: (
       <TodayPage
         tasks={todayTasks}
@@ -591,6 +609,12 @@ function FlowDeskIndex() {
     settings: <SettingsPage role={role} notifications={notifications} />,
   }[currentPage];
 
+  // If on a /member/:id path, show the member detail page instead
+  const memberIdMatch = location.pathname.match(/^\/member\/(.+)$/);
+  const activePage = memberIdMatch
+    ? <MemberDetailPage userId={memberIdMatch[1]} users={users} tasks={tasks} role={role} />
+    : page;
+
   return (
     <SidebarProvider defaultOpen>
       <div className="min-h-screen w-full bg-background text-foreground">
@@ -609,18 +633,9 @@ function FlowDeskIndex() {
                 unreadNotifications={notifications.filter((item) => item.unread).length}
               />
               <main className="flex-1 overflow-hidden px-3 pb-3 md:px-4 md:pb-4">
-                <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
-                  <section className="min-h-[calc(100vh-5.25rem)] rounded-md border border-border/70 bg-surface-panel shadow-sm">
-                    <div className="h-full overflow-auto p-3 md:p-4">{page}</div>
-                  </section>
-                  <RightRail
-                    task={selectedTask}
-                    meeting={selectedMeeting}
-                    notifications={notifications}
-                    isOpen={notificationsOpen}
-                    onClose={() => setNotificationsOpen(false)}
-                  />
-                </div>
+                <section className="min-h-[calc(100vh-5.25rem)] rounded-md border border-border/70 bg-surface-panel shadow-sm">
+                  <div className="h-full overflow-auto p-3 md:p-4">{activePage}</div>
+                </section>
               </main>
             </div>
           </SidebarInset>
@@ -1076,6 +1091,390 @@ function SectionBlock({ title, helper, children }: { title: string; helper: stri
   );
 }
 
+/* ───────────── Home Page ───────────── */
+
+const statusDot: Record<UserRecord["status"], string> = {
+  online: "bg-metric-green",
+  away: "bg-metric-amber",
+  review: "bg-metric-blue",
+};
+
+function HomePage({
+  users,
+  tasks,
+  todayTasks,
+  weeklyTasks,
+  role,
+}: {
+  users: UserRecord[];
+  tasks: AppTask[];
+  todayTasks: AppTask[];
+  weeklyTasks: AppTask[];
+  role: Role;
+}) {
+  const navigate = useNavigate();
+  const canViewDetails = role === "manager" || role === "admin";
+
+  const todayCompleted = todayTasks.filter((t) => t.status === "completed").length;
+  const todayEmergency = todayTasks.filter((t) => t.status === "emergency").length;
+  const weeklyHighPriority = weeklyTasks.filter((t) => ["critical", "high"].includes(t.priority)).length;
+
+  const surfaceCards = [
+    {
+      key: "today" as const,
+      path: "/today",
+      icon: LayoutGrid,
+      title: "Today's Tasks",
+      subtitle: `${todayTasks.length} tasks · ${todayCompleted} completed${todayEmergency > 0 ? ` · ${todayEmergency} emergency` : ""}`,
+      tone: "bg-metric-blue-soft text-metric-blue",
+      stat: `${todayTasks.length}`,
+    },
+    {
+      key: "weekly" as const,
+      path: "/weekly",
+      icon: CalendarClock,
+      title: "Weekly Tasks",
+      subtitle: `${weeklyTasks.length} tasks · ${weeklyHighPriority} high priority`,
+      tone: "bg-metric-amber-soft text-metric-amber",
+      stat: `${weeklyTasks.length}`,
+    },
+    {
+      key: "total" as const,
+      path: "/total",
+      icon: Inbox,
+      title: "Total Tasks",
+      subtitle: `${tasks.length} tasks across all projects and weeks`,
+      tone: "bg-metric-emerald-soft text-metric-emerald",
+      stat: `${tasks.length}`,
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <PageIntro pageKey="home" />
+
+      {/* Team members card */}
+      <Card className="rounded-md border-border/70 shadow-none">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Team Members</CardTitle>
+          </div>
+          <CardDescription>
+            {canViewDetails
+              ? "Click on a member to view their projects and tasks."
+              : "Hover on a member to see their details."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-1">
+            {users.map((user, i) => {
+              const initials = user.name
+                .split(" ")
+                .map((n) => n[0])
+                .join("");
+
+              return (
+                <Tooltip key={user.id} delayDuration={150}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (canViewDetails) navigate(`/member/${user.id}`);
+                      }}
+                      className={cn(
+                        "relative flex h-12 w-12 items-center justify-center rounded-full border-2 border-card text-sm font-semibold transition-all duration-200",
+                        "hover:z-10 hover:scale-110 hover:shadow-lg",
+                        canViewDetails ? "cursor-pointer" : "cursor-default",
+                        i > 0 ? "-ml-3" : "",
+                        user.status === "online"
+                          ? "bg-primary/15 text-primary"
+                          : user.status === "review"
+                            ? "bg-metric-blue-soft text-metric-blue"
+                            : "bg-surface-soft text-muted-foreground",
+                      )}
+                    >
+                      {initials}
+                      <span
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card",
+                          statusDot[user.status],
+                        )}
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    className="rounded-lg border border-border/70 bg-card p-3 shadow-xl"
+                  >
+                    <div className="space-y-1.5">
+                      <p className="text-sm font-semibold text-foreground">{user.name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Badge className={cn("text-[10px]", statusTone[user.status === "online" ? "completed" : user.status === "review" ? "in-progress" : "to-do"])}>
+                          {user.status}
+                        </Badge>
+                        <span>·</span>
+                        <span>{roleLabels[user.role]}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{user.team} · {user.utilization}% utilization</p>
+                      {canViewDetails && (
+                        <p className="mt-1 text-[11px] font-medium text-primary">Click to view details →</p>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+          {/* Expanded row with names for context */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {users.map((user) => (
+              <div
+                key={user.id}
+                className="flex items-center gap-2 rounded-full border border-border/70 bg-surface-soft px-3 py-1.5"
+              >
+                <span className={cn("h-2 w-2 rounded-full", statusDot[user.status])} />
+                <span className="text-xs font-medium text-foreground">{user.name}</span>
+                <span className="text-[10px] text-muted-foreground">{user.team}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Task surfaces */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {surfaceCards.map((card) => (
+          <button
+            key={card.key}
+            type="button"
+            onClick={() => navigate(card.path)}
+            className="group rounded-md border border-border/70 bg-card p-5 text-left shadow-none transition-all duration-200 hover:border-primary/40 hover:shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", card.tone)}>
+                <card.icon className="h-5 w-5" />
+              </div>
+              <span className="text-3xl font-bold text-foreground">{card.stat}</span>
+            </div>
+            <h3 className="mt-4 text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+              {card.title}
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">{card.subtitle}</p>
+            <div className="mt-4 flex items-center gap-1 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+              View page <ChevronRight className="h-3.5 w-3.5" />
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── Member Detail Page ───────────── */
+
+function MemberDetailPage({
+  userId,
+  users,
+  tasks,
+  role,
+}: {
+  userId: string;
+  users: UserRecord[];
+  tasks: AppTask[];
+  role: Role;
+}) {
+  const navigate = useNavigate();
+  const user = users.find((u) => u.id === userId);
+
+  // If not manager/admin, redirect home
+  useEffect(() => {
+    if (role === "employee") {
+      navigate("/", { replace: true });
+    }
+  }, [role, navigate]);
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <AlertCircle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Member not found.</p>
+        <Button variant="outline" onClick={() => navigate("/")}>
+          Back to Home
+        </Button>
+      </div>
+    );
+  }
+
+  const initials = user.name
+    .split(" ")
+    .map((n) => n[0])
+    .join("");
+
+  // Assign tasks to users based on owner name matching
+  const userTasks = tasks.filter((t) => t.owner === user.name);
+  const projects = [...new Set(userTasks.map((t) => t.project))];
+  const completedTasks = userTasks.filter((t) => t.status === "completed").length;
+  const inProgressTasks = userTasks.filter((t) => t.status === "in-progress").length;
+  const pendingTasks = userTasks.filter((t) => t.status !== "completed").length;
+
+  return (
+    <div className="space-y-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="hover:text-foreground transition-colors"
+        >
+          Home
+        </button>
+        <ChevronRight className="h-3.5 w-3.5" />
+        <span className="text-foreground font-medium">{user.name}</span>
+      </div>
+
+      {/* Member header */}
+      <Card className="rounded-md border-border/70 shadow-none overflow-hidden">
+        <div className="h-2 bg-gradient-to-r from-primary via-primary/60 to-primary/20" />
+        <CardContent className="p-6">
+          <div className="flex flex-wrap items-start gap-5">
+            <div className="relative">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/15 text-xl font-bold text-primary">
+                {initials}
+              </div>
+              <span className={cn("absolute bottom-1 right-1 h-4 w-4 rounded-full border-2 border-card", statusDot[user.status])} />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="text-xl font-semibold text-foreground">{user.name}</h2>
+                <Badge className={cn("text-[11px]", statusTone[user.status === "online" ? "completed" : user.status === "review" ? "in-progress" : "to-do"])}>
+                  {user.status}
+                </Badge>
+                <Badge variant="outline" className="rounded-full border-border/70 px-2 py-1 text-[11px]">
+                  {roleLabels[user.role]}
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">{user.team} team</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Utilization</span>
+                <Progress value={user.utilization} className="h-2 w-32 bg-secondary" />
+                <span className="text-xs font-medium text-foreground">{user.utilization}%</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick stats */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "Total tasks", value: `${userTasks.length}`, tone: "blue" as const, helper: "All assigned tasks." },
+          { label: "In progress", value: `${inProgressTasks}`, tone: "amber" as const, helper: "Currently active work." },
+          { label: "Completed", value: `${completedTasks}`, tone: "green" as const, helper: "Finished tasks." },
+          { label: "Projects", value: `${projects.length}`, tone: "emerald" as const, helper: "Active project assignments." },
+        ].map((item) => (
+          <Card key={item.label} className="rounded-md border-border/70 shadow-none">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{item.value}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{item.helper}</p>
+                </div>
+                <span className={cn("rounded-md border px-2 py-1 text-xs font-medium", metricTone[item.tone])}>{item.label}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Projects */}
+      {projects.length > 0 && (
+        <Card className="rounded-md border-border/70 shadow-none">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Projects</CardTitle>
+            <CardDescription>Projects {user.name} is currently assigned to.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {projects.map((project) => {
+                const count = userTasks.filter((t) => t.project === project).length;
+                return (
+                  <div
+                    key={project}
+                    className="flex items-center gap-2 rounded-full border border-border/70 bg-surface-soft px-4 py-2"
+                  >
+                    <Target className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">{project}</span>
+                    <Badge variant="outline" className="rounded-full border-border/70 px-1.5 py-0.5 text-[10px]">
+                      {count} {count === 1 ? "task" : "tasks"}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tasks list */}
+      <Card className="rounded-md border-border/70 shadow-none">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Assigned Tasks</CardTitle>
+          <CardDescription>All tasks assigned to {user.name}.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {userTasks.length > 0 ? (
+            <div className="space-y-3">
+              {userTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-md border border-border/70 bg-surface-soft p-4 transition-colors hover:bg-background"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">{task.title}</p>
+                        {task.emergency && <Badge className={statusTone.emergency}>Emergency</Badge>}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>{task.id}</span>
+                        <span>·</span>
+                        <span>{task.project}</span>
+                        <span>·</span>
+                        <span>Due {task.due}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className={statusTone[task.status]}>{task.status.replace("-", " ")}</Badge>
+                        <Badge className={priorityTone[task.priority]}>{task.priority}</Badge>
+                        {task.tags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="rounded-full border-border/70 bg-background px-2 py-1 text-[11px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-medium text-foreground">{task.progress}%</span>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <Progress value={task.progress} className="h-1.5 bg-secondary" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-border/70 bg-surface-soft p-8 text-center text-sm text-muted-foreground">
+              No tasks currently assigned to {user.name}.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function TodayPage({
   tasks,
   selectedTask,
@@ -1091,12 +1490,21 @@ function TodayPage({
   onPullOpen: () => void;
   onAddTask: () => void;
 }) {
-  const groups: Array<{ title: string; status: TaskStatus; helper: string }> = [
-    { title: "Emergency", status: "emergency", helper: "Must move first; review states remain visible." },
-    { title: "In Progress", status: "in-progress", helper: "Active work with visible ownership and progress." },
-    { title: "To Do", status: "to-do", helper: "Ready to start or waiting for today’s pull decision." },
-    { title: "Completed", status: "completed", helper: "Finished today, still visible for sign-off and audit." },
-  ];
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "completed">("all");
+
+  const sortedTasks = useMemo(() => {
+    const order: Record<TaskStatus, number> = { emergency: 0, "in-progress": 1, "to-do": 2, blocked: 3, completed: 4 };
+    return [...tasks].sort((a, b) => order[a.status] - order[b.status]);
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (statusFilter === "completed") return sortedTasks.filter((t) => t.status === "completed");
+    if (statusFilter === "pending") return sortedTasks.filter((t) => t.status !== "completed");
+    return sortedTasks;
+  }, [sortedTasks, statusFilter]);
+
+  const pendingCount = tasks.filter((t) => t.status !== "completed").length;
+  const completedCount = tasks.filter((t) => t.status === "completed").length;
 
   return (
     <div className="space-y-4">
@@ -1117,26 +1525,67 @@ function TodayPage({
       />
       <MetricsRow
         items={[
-          { label: "Completed", value: `${tasks.filter((task) => task.status === "completed").length}`, tone: "green", helper: "Ready for review and reporting." },
+          { label: "Completed", value: `${completedCount}`, tone: "green", helper: "Ready for review and reporting." },
           { label: "In progress", value: `${tasks.filter((task) => task.status === "in-progress").length}`, tone: "blue", helper: "Live work currently assigned today." },
           { label: "Emergency", value: `${tasks.filter((task) => task.status === "emergency").length}`, tone: "red", helper: "Escalated items visible at the top." },
           { label: "Review", value: `${tasks.filter((task) => task.requiresReview).length}`, tone: "amber", helper: "Need manager or admin confirmation." },
         ]}
       />
-      <div className="grid gap-3 lg:grid-cols-2">
-        {groups.map((group) => (
-          <SectionBlock key={group.title} title={group.title} helper={group.helper}>
-            {tasks.filter((task) => task.status === group.status).map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                selected={selectedTask?.id === task.id}
-                onSelect={() => onSelectTask(task.id)}
-                onToggleTask={() => onToggleTask(task.id)}
-              />
-            ))}
-          </SectionBlock>
+      {/* Status filter chips */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("all")}
+          className={cn(
+            "rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
+            statusFilter === "all"
+              ? "border-primary bg-primary text-primary-foreground shadow-sm"
+              : "border-border/70 bg-card text-muted-foreground hover:bg-surface-soft hover:text-foreground",
+          )}
+        >
+          All ({tasks.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter("pending")}
+          className={cn(
+            "rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
+            statusFilter === "pending"
+              ? "border-metric-amber bg-metric-amber-soft text-metric-amber shadow-sm"
+              : "border-border/70 bg-card text-muted-foreground hover:bg-surface-soft hover:text-foreground",
+          )}
+        >
+          Pending ({pendingCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter("completed")}
+          className={cn(
+            "rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
+            statusFilter === "completed"
+              ? "border-metric-green bg-metric-green-soft text-metric-green shadow-sm"
+              : "border-border/70 bg-card text-muted-foreground hover:bg-surface-soft hover:text-foreground",
+          )}
+        >
+          Completed ({completedCount})
+        </button>
+      </div>
+      {/* Unified task list */}
+      <div className="space-y-3">
+        {filteredTasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            selected={selectedTask?.id === task.id}
+            onSelect={() => onSelectTask(task.id)}
+            onToggleTask={() => onToggleTask(task.id)}
+          />
         ))}
+        {filteredTasks.length === 0 && (
+          <div className="rounded-md border border-dashed border-border/70 bg-surface-soft p-8 text-center text-sm text-muted-foreground">
+            No tasks match the selected filter.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1265,34 +1714,38 @@ function TotalTasksPage({
           </>
         }
       />
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="space-y-3">
-          {Object.entries(grouped).map(([week, items]) => (
-            <SectionBlock key={week} title={week} helper="Default grouped backlog view with future backend filter slots.">
-              {items.map((task) => (
-                <TaskCard key={task.id} task={task} selected={selectedTaskId === task.id} onSelect={() => onSelectTask(task.id)} />
-              ))}
-            </SectionBlock>
+      {/* Filter bar - horizontal, on top of the week cards */}
+      <div className="rounded-md border border-border/70 bg-card p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            Filters
+          </div>
+          <div className="h-5 w-px bg-border/70" />
+          {[
+            "Search task IDs or owners",
+            "Project",
+            "Week",
+            "Overdue",
+          ].map((item) => (
+            <div
+              key={item}
+              className="rounded-full border border-dashed border-border/70 bg-surface-soft px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/35 hover:bg-surface-soft hover:text-foreground cursor-pointer"
+            >
+              {item}
+            </div>
           ))}
         </div>
-        <Card className="rounded-md border-border/70 shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Filter panel</CardTitle>
-            <CardDescription>Backend-ready placeholders for role, project, and date logic.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {[
-              "Search task IDs or owners",
-              "Filter by project and week",
-              "Surface overdue and revise-date requests",
-              "Preview project/list views",
-            ].map((item) => (
-              <div key={item} className="rounded-md border border-dashed border-border/70 bg-surface-soft p-3 text-muted-foreground">
-                {item}
-              </div>
+      </div>
+      {/* Week-grouped backlog */}
+      <div className="space-y-3">
+        {Object.entries(grouped).map(([week, items]) => (
+          <SectionBlock key={week} title={week} helper="Default grouped backlog view with future backend filter slots.">
+            {items.map((task) => (
+              <TaskCard key={task.id} task={task} selected={selectedTaskId === task.id} onSelect={() => onSelectTask(task.id)} />
             ))}
-          </CardContent>
-        </Card>
+          </SectionBlock>
+        ))}
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/today" element={<Index />} />
           <Route path="/weekly" element={<Index />} />
           <Route path="/total" element={<Index />} />
           <Route path="/meetings" element={<Index />} />
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/analytics" element={<Index />} />
           <Route path="/users" element={<Index />} />
           <Route path="/settings" element={<Index />} />
+          <Route path="/member/:id" element={<Index />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
