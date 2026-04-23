@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
+  AlignLeft,
   ArrowRightLeft,
   Bell,
+  Calendar,
   CalendarClock,
   CheckCircle2,
   CheckSquare,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleEllipsis,
   Clock3,
@@ -18,12 +21,14 @@ import {
   Home,
   Inbox,
   LayoutGrid,
+  List,
   ListFilter,
   LoaderCircle,
   MessageSquareText,
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Repeat,
   Search,
   Settings,
   ShieldCheck,
@@ -33,8 +38,23 @@ import {
   TrendingUp,
   Users,
   WandSparkles,
+  X,
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameDay,
+  isSameMonth,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
+} from "date-fns";
 
 import { NavLink } from "@/components/NavLink";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +109,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type Role = "employee" | "manager" | "admin";
@@ -122,16 +147,27 @@ type AppTask = {
   tags: string[];
 };
 
+type RecurrenceFrequency = "daily" | "weekly" | "monthly";
+
+type MeetingRecurrence = {
+  frequency: RecurrenceFrequency;
+  interval: number;
+  count: number;
+};
+
 type Meeting = {
   id: string;
   title: string;
   project: string;
   time: string;
+  dateTime: string;
+  duration: number;
   attendees: string[];
   status: "scheduled" | "draft" | "review";
   summary: string;
   actions: string[];
   aiConfidence: number;
+  recurrence?: MeetingRecurrence;
 };
 
 type ApprovalItem = {
@@ -346,34 +382,85 @@ const meetingsSeed: Meeting[] = [
     id: "MOM-38",
     title: "Weekly delivery steering",
     project: "FlowDesk Core",
-    time: "Today · 15:00",
+    time: "Tue, May 31, 06:56 PM",
+    dateTime: "2026-05-31T18:56",
+    duration: 30,
     attendees: ["Jon", "Maya", "Sara", "Leo"],
-    status: "review",
+    status: "scheduled",
     summary: "AI extracted 6 tasks and flagged 2 low-confidence action owners.",
     actions: ["Approve action owners", "Send summary", "Create follow-up tasks"],
     aiConfidence: 84,
+    recurrence: { frequency: "weekly", interval: 1, count: 20 },
   },
   {
     id: "MOM-37",
     title: "Client recovery call",
     project: "Westbridge",
-    time: "Tomorrow · 09:00",
-    attendees: ["Maya", "Omar", "Nina"],
-    status: "draft",
+    time: "Tue, May 24, 06:56 PM",
+    dateTime: "2026-05-24T18:56",
+    duration: 30,
+    attendees: ["Maya", "Omar", "Nina", "Leo"],
+    status: "scheduled",
     summary: "Draft agenda and pre-read attached. Awaiting approval for escalated asks.",
     actions: ["Attach latest blockers", "Confirm attendees"],
     aiConfidence: 72,
+    recurrence: { frequency: "weekly", interval: 1, count: 20 },
   },
   {
     id: "MOM-36",
     title: "Quarterly staffing calibration",
     project: "People Ops",
-    time: "Thu · 11:30",
-    attendees: ["Sara", "Ivy", "Admin"],
+    time: "Tue, May 17, 06:56 PM",
+    dateTime: "2026-05-17T18:56",
+    duration: 30,
+    attendees: ["Sara", "Ivy", "Admin", "Maya"],
     status: "scheduled",
     summary: "Pending calendar sync connection for room and reminders.",
     actions: ["Enable sync later", "Assign agenda owner"],
     aiConfidence: 93,
+    recurrence: { frequency: "weekly", interval: 1, count: 20 },
+  },
+  {
+    id: "MOM-35",
+    title: "Daily standup",
+    project: "FlowDesk Core",
+    time: "Mon, May 16, 09:00 AM",
+    dateTime: "2026-05-16T09:00",
+    duration: 15,
+    attendees: ["Jon", "Maya", "Sara", "Leo"],
+    status: "scheduled",
+    summary: "Quick daily sync on blockers and progress.",
+    actions: ["Review blockers", "Update board"],
+    aiConfidence: 90,
+    recurrence: { frequency: "daily", interval: 1, count: 4 },
+  },
+  {
+    id: "MOM-34",
+    title: "Monthly budget review",
+    project: "Finance",
+    time: "Fri, May 13, 02:00 PM",
+    dateTime: "2026-05-13T14:00",
+    duration: 60,
+    attendees: ["Ivy", "Admin", "Sara"],
+    status: "scheduled",
+    summary: "Review monthly spend and forecasts.",
+    actions: ["Prepare reports", "Share projections"],
+    aiConfidence: 88,
+    recurrence: { frequency: "monthly", interval: 1, count: 2 },
+  },
+  {
+    id: "MOM-33",
+    title: "Sprint retrospective",
+    project: "FlowDesk Core",
+    time: "Fri, May 6, 03:00 PM",
+    dateTime: "2026-05-06T15:00",
+    duration: 45,
+    attendees: ["Jon", "Maya", "Omar"],
+    status: "review",
+    summary: "Reflect on sprint outcomes and process improvements.",
+    actions: ["Document improvements", "Update process"],
+    aiConfidence: 76,
+    recurrence: { frequency: "weekly", interval: 2, count: 12 },
   },
 ];
 
@@ -504,12 +591,11 @@ function getPageKey(pathname: string): PageKey {
 function FlowDeskIndex() {
   const [role, setRole] = useState<Role>("manager");
   const [tasks, setTasks] = useState(tasksSeed);
-  const [meetings] = useState(meetingsSeed);
+  const [meetings, setMeetings] = useState(meetingsSeed);
   const [approvals] = useState(approvalsSeed);
   const [notifications] = useState(notificationsSeed);
   const [users] = useState(usersSeed);
   const [selectedTaskId, setSelectedTaskId] = useState(tasksSeed[0]?.id ?? "");
-  const [selectedMeetingId, setSelectedMeetingId] = useState(meetingsSeed[0]?.id ?? "");
   const [commandOpen, setCommandOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
@@ -543,7 +629,6 @@ function FlowDeskIndex() {
   }, [availableNav, location.pathname, navigate]);
 
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
-  const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? meetings[0];
   const todayTasks = tasks.filter((task) => ["emergency", "in-progress", "to-do", "completed"].includes(task.status));
   const weeklyTasks = tasks.filter((task) => task.week === "This week" || task.week === "Week 17");
   const completionRate = Math.round((tasks.filter((task) => task.status === "completed").length / tasks.length) * 100);
@@ -602,7 +687,7 @@ function FlowDeskIndex() {
     total: (
       <TotalTasksPage tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} onOpenPull={() => setPullOpen(true)} />
     ),
-    meetings: <MeetingsPage meetings={meetings} selectedMeeting={selectedMeeting} onSelectMeeting={setSelectedMeetingId} />,
+    meetings: <MeetingsPage meetings={meetings} users={users} onAddMeeting={(m: Meeting) => setMeetings(prev => [m, ...prev])} />,
     approvals: <ApprovalsPage approvals={approvals} role={role} />,
     analytics: <AnalyticsPage role={role} />, 
     users: <UsersPage users={users} />, 
@@ -1753,110 +1838,692 @@ function TotalTasksPage({
 
 function MeetingsPage({
   meetings,
-  selectedMeeting,
-  onSelectMeeting,
+  users,
+  onAddMeeting,
 }: {
   meetings: Meeting[];
-  selectedMeeting?: Meeting;
-  onSelectMeeting: (meetingId: string) => void;
+  users: UserRecord[];
+  onAddMeeting: (meeting: Meeting) => void;
 }) {
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [freqFilter, setFreqFilter] = useState<"all" | "daily" | "weekly" | "monthly">("all");
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+
+  const dailyCount = meetings.filter((m) => m.recurrence?.frequency === "daily").length;
+  const weeklyCount = meetings.filter((m) => m.recurrence?.frequency === "weekly").length;
+  const monthlyCount = meetings.filter((m) => m.recurrence?.frequency === "monthly").length;
+
+  const filtered = freqFilter === "all"
+    ? meetings
+    : meetings.filter((m) => m.recurrence?.frequency === freqFilter);
+
+  const freqTabs = [
+    { key: "all" as const, label: "All", icon: Calendar, count: meetings.length },
+    { key: "daily" as const, label: "Daily", icon: Clock3, count: dailyCount },
+    { key: "weekly" as const, label: "Weekly", icon: Calendar, count: weeklyCount },
+    { key: "monthly" as const, label: "Monthly", icon: LayoutGrid, count: monthlyCount },
+  ];
+
   return (
-    <div className="space-y-4">
-      <PageIntro
-        pageKey="meetings"
-        actions={
-          <>
-            <Button variant="outline" className="gap-2 bg-card">
-              <CalendarClock className="h-4 w-4" />
-              Calendar view
-            </Button>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              Schedule meeting
-            </Button>
-          </>
-        }
+    <div className="space-y-5">
+      <ScheduleMeetingDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        users={users}
+        onSubmit={onAddMeeting}
       />
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-3">
-          {meetings.map((meeting) => (
+
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold text-foreground">Meetings &amp; MOM</h2>
+          <p className="text-sm text-muted-foreground">Manage review meetings and track action items</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* List / Calendar toggle */}
+          <div className="flex items-center rounded-lg border border-border/70 bg-card p-1">
             <button
-              key={meeting.id}
               type="button"
-              onClick={() => onSelectMeeting(meeting.id)}
+              onClick={() => setViewMode("list")}
               className={cn(
-                "w-full rounded-md border bg-card p-4 text-left transition-colors hover:border-primary/35 hover:bg-surface-soft",
-                selectedMeeting?.id === meeting.id ? "border-primary/45 bg-surface-soft" : "border-border/70",
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                viewMode === "list"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-foreground">{meeting.title}</p>
-                    <Badge className={statusTone[meeting.status]}>{meeting.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">{meeting.project}</p>
-                </div>
-                <Badge className="bg-accent text-accent-foreground border-transparent">{meeting.aiConfidence}% AI</Badge>
-              </div>
-              <p className="mt-3 text-sm text-muted-foreground">{meeting.summary}</p>
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Clock3 className="h-3.5 w-3.5" />
-                {meeting.time}
-                <span>•</span>
-                {meeting.attendees.join(", ")}
-              </div>
+              <List className="h-4 w-4" />
+              List
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("calendar")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                viewMode === "calendar"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Calendar className="h-4 w-4" />
+              Calendar
+            </button>
+          </div>
+          {/* Schedule Meeting */}
+          <Button className="gap-2" onClick={() => setScheduleOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Schedule Meeting
+          </Button>
+        </div>
+      </div>
+
+      {/* Frequency filter tabs */}
+      <div className="flex items-center gap-1 border-b border-border/70 pb-px">
+        {freqTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setFreqFilter(tab.key)}
+            className={cn(
+              "flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
+              freqFilter === tab.key
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+            )}
+          >
+            <tab.icon className="h-4 w-4" />
+            {tab.label}
+            <span
+              className={cn(
+                "ml-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+                freqFilter === tab.key
+                  ? "bg-primary/10 text-primary"
+                  : "bg-surface-soft text-muted-foreground",
+              )}
+            >
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Meeting cards or Calendar View */}
+      {viewMode === "list" ? (
+        <div className="space-y-3">
+          {filtered.map((meeting) => (
+            <div
+              key={meeting.id}
+              className="group flex items-center gap-4 rounded-lg border border-border/70 bg-card p-4 transition-all hover:border-primary/30 hover:shadow-sm cursor-pointer"
+            >
+              {/* Calendar icon */}
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-metric-green-soft text-metric-green">
+                <Calendar className="h-5 w-5" />
+              </div>
+
+              {/* Content */}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground">{meeting.title}</p>
+                  <Badge className={statusTone[meeting.status]}>{meeting.status}</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {meeting.time} • {meeting.duration} min
+                </p>
+                <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Users className="h-3 w-3" />
+                    {meeting.attendees.length}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    {meeting.actions.length} actions
+                  </span>
+                </div>
+              </div>
+
+              {/* Chevron */}
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+            </div>
+          ))}
+
+          {filtered.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border/70 bg-surface-soft p-10 text-center">
+              <Calendar className="mx-auto h-8 w-8 text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">No meetings match the selected filter.</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <MeetingsCalendarView meetings={filtered} />
+      )}
+    </div>
+  );
+}
+
+/* ───── Meetings Calendar View ───── */
+
+function MeetingsCalendarView({ meetings }: { meetings: Meeting[] }) {
+  // Default to the current month so newly scheduled meetings are visible immediately
+  const [currentMonth, setCurrentMonth] = useState(() => new Date());
+
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(monthStart);
+  const startDate = startOfWeek(monthStart);
+  const endDate = endOfWeek(monthEnd);
+
+  const days = eachDayOfInterval({ start: startDate, end: endDate });
+
+  const calendarMeetings = useMemo(() => {
+    const instances: Meeting[] = [];
+    meetings.forEach((m) => {
+      if (!m.dateTime) return;
+      const baseDate = new Date(m.dateTime);
+      if (isNaN(baseDate.getTime())) return;
+
+      if (m.recurrence) {
+        const { frequency, interval, count } = m.recurrence;
+        // Generate 'count' instances
+        for (let i = 0; i < count; i++) {
+          let instanceDate = baseDate;
+          if (frequency === "daily") {
+            instanceDate = addDays(baseDate, i * interval);
+          } else if (frequency === "weekly") {
+            instanceDate = addWeeks(baseDate, i * interval);
+          } else if (frequency === "monthly") {
+            instanceDate = addMonths(baseDate, i * interval);
+          }
+          instances.push({
+            ...m,
+            id: `${m.id}-inst-${i}`, // Ensure unique ID for React rendering
+            dateTime: instanceDate.toISOString(),
+          });
+        }
+      } else {
+        // Not recurring, just push once
+        instances.push(m);
+      }
+    });
+    return instances;
+  }, [meetings]);
+
+  const getEventColor = (meeting: Meeting) => {
+    switch (meeting.recurrence?.frequency) {
+      case "daily":
+        return "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30";
+      case "weekly":
+        return "bg-green-100 text-green-700 border-green-200 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/30";
+      case "monthly":
+        return "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/30";
+      default:
+        return "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30";
+    }
+  };
+
+  const getLegendColor = (type: string) => {
+    switch (type) {
+      case "daily":
+        return "bg-blue-200 dark:bg-blue-500/40";
+      case "weekly":
+        return "bg-green-200 dark:bg-green-500/40";
+      case "monthly":
+        return "bg-purple-200 dark:bg-purple-500/40";
+      default:
+        return "bg-slate-200 dark:bg-slate-500/40";
+    }
+  };
+
+  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
+  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-card p-4 flex flex-col gap-4 animate-in fade-in duration-300">
+      {/* Calendar Header */}
+      <div className="flex items-center justify-between px-2">
+        <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 hover:bg-surface-soft">
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <h3 className="text-lg font-bold text-foreground">
+          {format(currentMonth, "MMMM yyyy")}
+        </h3>
+        <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 hover:bg-surface-soft">
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+      </div>
+
+      {/* Grid */}
+      <div className="border border-border/70 rounded-md overflow-hidden bg-surface-soft">
+        {/* Days Header */}
+        <div className="grid grid-cols-7 border-b border-border/70 bg-card">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} className="p-3 text-center text-xs font-semibold text-muted-foreground">
+              {day}
+            </div>
           ))}
         </div>
-        <Card className="rounded-md border-border/70 shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Meeting detail</CardTitle>
-            <CardDescription>List-first experience with AI draft review and linked tasks.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {selectedMeeting ? (
-              <Tabs defaultValue="minutes" className="space-y-4">
-                <TabsList className="grid w-full grid-cols-3 bg-surface-soft">
-                  <TabsTrigger value="minutes">M.O.M</TabsTrigger>
-                  <TabsTrigger value="ai">AI Draft</TabsTrigger>
-                  <TabsTrigger value="tasks">Linked Tasks</TabsTrigger>
-                </TabsList>
-                <TabsContent value="minutes" className="space-y-3">
-                  <div>
-                    <h3 className="text-sm font-semibold">{selectedMeeting.title}</h3>
-                    <p className="text-sm text-muted-foreground">{selectedMeeting.summary}</p>
-                  </div>
-                  <div className="rounded-md bg-surface-soft p-3 text-sm text-muted-foreground">
-                    Manual notes, attendance, and final summary fields would connect here later.
-                  </div>
-                </TabsContent>
-                <TabsContent value="ai" className="space-y-3">
-                  <div className="rounded-md border border-border/70 bg-surface-soft p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">AI extracted actions</p>
-                      <Badge className="bg-accent text-accent-foreground border-transparent">{selectedMeeting.aiConfidence}% confidence</Badge>
+
+        {/* Days Grid */}
+        <div className="grid grid-cols-7 auto-rows-[120px]">
+          {days.map((day, i) => {
+            const dayMeetings = calendarMeetings.filter(
+              (m) => m.dateTime && isSameDay(new Date(m.dateTime), day)
+            );
+            
+            const isCurrentMonth = isSameMonth(day, monthStart);
+
+            return (
+              <div
+                key={day.toISOString()}
+                className={cn(
+                  "border-r border-b border-border/70 p-1.5 flex flex-col gap-1 bg-card transition-colors hover:bg-surface-soft/40",
+                  !isCurrentMonth && "bg-surface-soft/50 text-muted-foreground/50",
+                  i % 7 === 6 && "border-r-0", // Remove right border for last column
+                  i >= days.length - 7 && "border-b-0" // Remove bottom border for last row
+                )}
+              >
+                <span className={cn(
+                  "text-xs font-medium p-1 select-none",
+                  !isCurrentMonth ? "text-muted-foreground/50" : "text-muted-foreground"
+                )}>
+                  {format(day, "d")}
+                </span>
+                
+                <div className="flex flex-col gap-1 overflow-y-auto hide-scrollbar">
+                  {dayMeetings.slice(0, 3).map((meeting) => (
+                    <div
+                      key={meeting.id}
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-medium truncate border flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity",
+                        getEventColor(meeting)
+                      )}
+                    >
+                      {meeting.recurrence?.frequency === "daily" && <Clock3 className="h-3 w-3 shrink-0 opacity-70" />}
+                      {meeting.recurrence?.frequency === "weekly" && <Calendar className="h-3 w-3 shrink-0 opacity-70" />}
+                      {meeting.recurrence?.frequency === "monthly" && <LayoutGrid className="h-3 w-3 shrink-0 opacity-70" />}
+                      {!meeting.recurrence?.frequency && <CalendarClock className="h-3 w-3 shrink-0 opacity-70" />}
+                      <span className="truncate">{meeting.title}</span>
                     </div>
-                    <div className="mt-3 space-y-2">
-                      {selectedMeeting.actions.map((action) => (
-                        <div key={action} className="rounded-md bg-background p-3 text-sm text-foreground">
-                          {action}
-                        </div>
-                      ))}
+                  ))}
+                  {dayMeetings.length > 3 && (
+                    <div className="rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-100 dark:text-blue-300 dark:bg-blue-500/10 dark:border-blue-500/20 text-center mt-0.5 cursor-pointer hover:opacity-80 transition-opacity">
+                      +{dayMeetings.length - 3} more
                     </div>
-                  </div>
-                </TabsContent>
-                <TabsContent value="tasks" className="space-y-3">
-                  <div className="rounded-md border border-dashed border-border/70 bg-surface-soft p-3 text-sm text-muted-foreground">
-                    Linked task preview stays visual for now, ready for future workflow wiring.
-                  </div>
-                </TabsContent>
-              </Tabs>
-            ) : null}
-          </CardContent>
-        </Card>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-6 pt-2 pb-1">
+        <div className="flex items-center gap-2">
+          <div className={cn("h-3.5 w-3.5 rounded-sm", getLegendColor("daily"))} />
+          <span className="text-xs font-medium text-muted-foreground">Daily</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={cn("h-3.5 w-3.5 rounded-sm", getLegendColor("weekly"))} />
+          <span className="text-xs font-medium text-muted-foreground">Weekly</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={cn("h-3.5 w-3.5 rounded-sm", getLegendColor("monthly"))} />
+          <span className="text-xs font-medium text-muted-foreground">Monthly</span>
+        </div>
       </div>
     </div>
+  );
+}
+
+/* ───── Schedule Meeting Dialog ───── */
+
+function ScheduleMeetingDialog({
+  open,
+  onOpenChange,
+  users,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  users: UserRecord[];
+  onSubmit: (meeting: Meeting) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [agenda, setAgenda] = useState("");
+  const [duration, setDuration] = useState("30");
+  const [dateTime, setDateTime] = useState("");
+  const [attendeeInput, setAttendeeInput] = useState("");
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [frequency, setFrequency] = useState<RecurrenceFrequency>("weekly");
+  const [interval, setInterval] = useState("1");
+  const [count, setCount] = useState("10");
+
+  const resetForm = () => {
+    setTitle("");
+    setAgenda("");
+    setDuration("30");
+    setDateTime("");
+    setAttendeeInput("");
+    setAttendees([]);
+    setIsRecurring(false);
+    setFrequency("weekly");
+    setInterval("1");
+    setCount("10");
+  };
+
+  // Filter user suggestions based on input
+  const suggestions = attendeeInput.length > 0
+    ? users.filter(
+        (u) =>
+          u.name.toLowerCase().includes(attendeeInput.toLowerCase()) &&
+          !attendees.includes(u.name),
+      )
+    : [];
+
+  const addAttendee = (name: string) => {
+    if (!attendees.includes(name)) {
+      setAttendees((prev) => [...prev, name]);
+    }
+    setAttendeeInput("");
+  };
+
+  const removeAttendee = (name: string) => {
+    setAttendees((prev) => prev.filter((a) => a !== name));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && attendeeInput.trim()) {
+      e.preventDefault();
+      // If there are suggestions, pick the first one; otherwise add as-is
+      if (suggestions.length > 0) {
+        addAttendee(suggestions[0].name);
+      } else if (attendeeInput.trim()) {
+        addAttendee(attendeeInput.trim());
+      }
+    }
+    if (e.key === "Backspace" && attendeeInput === "" && attendees.length > 0) {
+      removeAttendee(attendees[attendees.length - 1]);
+    }
+  };
+
+  // Build recurrence summary text
+  const recurrenceSummary = useMemo(() => {
+    if (!isRecurring) return "";
+    const intervalNum = parseInt(interval) || 1;
+    const countNum = parseInt(count) || 0;
+    const freqLabel =
+      frequency === "daily" ? (intervalNum === 1 ? "day" : "days") :
+      frequency === "weekly" ? (intervalNum === 1 ? "week" : "weeks") :
+      intervalNum === 1 ? "month" : "months";
+
+    let text = intervalNum === 1
+      ? `Every ${frequency === "daily" ? "day" : frequency === "weekly" ? "week" : "month"}`
+      : `Every ${intervalNum} ${freqLabel}`;
+
+    if (countNum > 0) {
+      text += `, ${countNum} ${countNum === 1 ? "time" : "times"}`;
+    }
+    return text;
+  }, [isRecurring, frequency, interval, count]);
+
+  const handleSubmit = () => {
+    let dtStr = "TBD";
+    let finalDateTime = dateTime;
+    
+    // Ensure we have a valid date string
+    if (dateTime) {
+      const parsed = new Date(dateTime);
+      if (!isNaN(parsed.getTime())) {
+        dtStr = parsed.toLocaleString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } else {
+        // Fallback if browser passed an invalid string
+        finalDateTime = new Date().toISOString();
+        dtStr = "Invalid Date - Defaulting to Today";
+      }
+    } else {
+      // Fallback if somehow submitted without date
+      finalDateTime = new Date().toISOString();
+    }
+
+    const newMeeting: Meeting = {
+      id: `MOM-${Date.now().toString(36)}`,
+      title: title || "Untitled Meeting",
+      project: "General",
+      time: dtStr,
+      dateTime: finalDateTime,
+      duration: parseInt(duration) || 30,
+      attendees,
+      status: "scheduled",
+      summary: agenda || "No agenda provided.",
+      actions: [],
+      aiConfidence: 0,
+      ...(isRecurring
+        ? {
+            recurrence: {
+              frequency,
+              interval: parseInt(interval) || 1,
+              count: parseInt(count) || 1,
+            },
+          }
+        : {}),
+    };
+    onSubmit(newMeeting);
+    resetForm();
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
+      <DialogContent className="max-w-lg rounded-lg border-border/70 bg-card p-0 overflow-hidden">
+        <div className="border-b border-border/70 px-6 pt-6 pb-4">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">Schedule Meeting</DialogTitle>
+            <DialogDescription>Create a new meeting and invite attendees.</DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto px-6 py-5 space-y-5">
+          {/* Title */}
+          <div className="space-y-2">
+            <Label htmlFor="meeting-title" className="text-sm font-medium flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              Title
+            </Label>
+            <Input
+              id="meeting-title"
+              placeholder="e.g. Weekly standup"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+
+          {/* Agenda */}
+          <div className="space-y-2">
+            <Label htmlFor="meeting-agenda" className="text-sm font-medium flex items-center gap-2">
+              <AlignLeft className="h-4 w-4 text-muted-foreground" />
+              Agenda
+            </Label>
+            <Textarea
+              id="meeting-agenda"
+              placeholder="What will be discussed?"
+              rows={3}
+              value={agenda}
+              onChange={(e) => setAgenda(e.target.value)}
+              className="resize-none"
+            />
+          </div>
+
+          {/* Duration + Date/Time */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="meeting-duration" className="text-sm font-medium flex items-center gap-2">
+                <Clock3 className="h-4 w-4 text-muted-foreground" />
+                Duration (min)
+              </Label>
+              <Input
+                id="meeting-duration"
+                type="number"
+                min={5}
+                step={5}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="meeting-datetime" className="text-sm font-medium flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                Date &amp; Time
+              </Label>
+              <Input
+                id="meeting-datetime"
+                type="datetime-local"
+                value={dateTime}
+                onChange={(e) => setDateTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Attendees */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium flex items-center gap-2">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              Attendees
+            </Label>
+            <div className="rounded-md border border-input bg-background p-2">
+              {/* Chips */}
+              {attendees.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {attendees.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                    >
+                      {name}
+                      <button
+                        type="button"
+                        onClick={() => removeAttendee(name)}
+                        className="ml-0.5 rounded-full p-0.5 hover:bg-primary/20 transition-colors"
+                        aria-label={`Remove ${name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* Input */}
+              <input
+                type="text"
+                placeholder="Type a name…"
+                value={attendeeInput}
+                onChange={(e) => setAttendeeInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            {/* Suggestions dropdown */}
+            {suggestions.length > 0 && (
+              <div className="rounded-md border border-border/70 bg-card shadow-lg overflow-hidden">
+                {suggestions.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => addAttendee(user.name)}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-surface-soft"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+                      {user.name.split(" ").map((n) => n[0]).join("")}
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{user.name}</p>
+                      <p className="text-xs text-muted-foreground">{user.team}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recurring toggle */}
+          <div className="rounded-lg border border-border/70 bg-surface-soft p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Repeat className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="recurring-toggle" className="text-sm font-medium cursor-pointer">
+                  Recurring meeting
+                </Label>
+              </div>
+              <Switch
+                id="recurring-toggle"
+                checked={isRecurring}
+                onCheckedChange={setIsRecurring}
+              />
+            </div>
+
+            {isRecurring && (
+              <div className="space-y-4 animate-in slide-in-from-top-2 fade-in duration-200">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Frequency</Label>
+                    <Select value={frequency} onValueChange={(v) => setFrequency(v as RecurrenceFrequency)}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="monthly">Monthly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Interval</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={interval}
+                      onChange={(e) => setInterval(e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Occurrences</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                </div>
+                {/* Dynamic recurrence summary */}
+                <div className="flex items-center gap-2 rounded-md bg-primary/5 border border-primary/15 px-3 py-2">
+                  <Repeat className="h-3.5 w-3.5 text-primary" />
+                  <p className="text-sm font-medium text-primary">{recurrenceSummary}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-border/70 px-6 py-4 flex items-center justify-end gap-3">
+          <Button variant="outline" onClick={() => { resetForm(); onOpenChange(false); }}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={!title.trim() || !dateTime}>
+            Schedule Meeting
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
