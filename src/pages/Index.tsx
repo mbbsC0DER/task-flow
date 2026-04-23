@@ -114,11 +114,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 type Role = "employee" | "manager" | "admin";
 type TaskStatus = "emergency" | "in-progress" | "to-do" | "completed" | "blocked";
-type Priority = "critical" | "high" | "medium" | "low";
+type Priority = "high" | "medium" | "low";
 type PageKey =
   | "home"
   | "today"
@@ -153,6 +154,32 @@ type MeetingRecurrence = {
   frequency: RecurrenceFrequency;
   interval: number;
   count: number;
+};
+
+type TaskActionItemDraft = {
+  title: string;
+  description: string;
+  assignee: string;
+  dueDate: string;
+  fixed: boolean;
+  priority: Priority;
+};
+
+type TaskDraft = {
+  title: string;
+  field: string;
+  customField: string;
+  fixed: boolean;
+  priority: Priority;
+  dueDate: string;
+  description: string;
+  assignee: string;
+  weight: string;
+  actionItems: TaskActionItemDraft[];
+};
+
+type BulkTaskDraft = TaskDraft & {
+  key: string;
 };
 
 type Meeting = {
@@ -274,7 +301,7 @@ const tasksSeed: AppTask[] = [
     due: "09:30",
     week: "This week",
     status: "emergency",
-    priority: "critical",
+    priority: "high",
     progress: 46,
     emergency: true,
     requiresReview: true,
@@ -370,7 +397,7 @@ const tasksSeed: AppTask[] = [
     due: "10:20",
     week: "This week",
     status: "in-progress",
-    priority: "critical",
+    priority: "high",
     progress: 63,
     emergency: true,
     tags: ["Overdue", "Escalation"],
@@ -480,7 +507,7 @@ const approvalsSeed: ApprovalItem[] = [
     title: "M.O.M review · weekly delivery steering",
     owner: "Maya Chen",
     age: "35m",
-    priority: "critical",
+    priority: "high",
     context: "2 AI-drafted tasks have low-confidence owners.",
   },
   {
@@ -568,7 +595,6 @@ const statusTone: Record<TaskStatus | ApprovalItem["type"] | Meeting["status"], 
 };
 
 const priorityTone: Record<Priority, string> = {
-  critical: "bg-metric-red-soft text-metric-red border-transparent",
   high: "bg-metric-amber-soft text-metric-amber border-transparent",
   medium: "bg-metric-blue-soft text-metric-blue border-transparent",
   low: "bg-secondary text-secondary-foreground border-transparent",
@@ -581,6 +607,95 @@ const metricTone = {
   red: "bg-metric-red-soft text-metric-red border-border/50",
   green: "bg-metric-green-soft text-metric-green border-border/50",
 };
+
+function createActionItemDraft(): TaskActionItemDraft {
+  return {
+    title: "",
+    description: "",
+    assignee: "Myself",
+    dueDate: "",
+    fixed: false,
+    priority: "medium",
+  };
+}
+
+function createTaskDraft(overrides: Partial<TaskDraft> = {}): TaskDraft {
+  return {
+    title: "",
+    field: "default",
+    customField: "",
+    fixed: false,
+    priority: "medium",
+    dueDate: "",
+    description: "",
+    assignee: "Myself",
+    weight: "10",
+    actionItems: [createActionItemDraft()],
+    ...overrides,
+  };
+}
+
+function getOwnerInitials(name: string) {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function formatTaskDueDate(dueDate: string) {
+  if (!dueDate) return "No due date";
+
+  try {
+    return format(new Date(`${dueDate}T00:00:00`), "MMM d");
+  } catch {
+    return "No due date";
+  }
+}
+
+function getTaskFieldLabel(field: string, customField: string) {
+  if (field === "custom") {
+    return customField.trim() || "Custom";
+  }
+
+  return field.charAt(0).toUpperCase() + field.slice(1);
+}
+
+function parseBulkTaskLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function syncBulkTaskDrafts(value: string, current: BulkTaskDraft[], seedDraft: TaskDraft) {
+  const titles = parseBulkTaskLines(value);
+
+  return titles.map((title, index) => {
+    const existing = current[index];
+
+    if (existing) {
+      return { ...existing, title };
+    }
+
+    return {
+      ...createTaskDraft({
+        field: seedDraft.field,
+        customField: seedDraft.customField,
+        fixed: seedDraft.fixed,
+        priority: seedDraft.priority,
+        dueDate: seedDraft.dueDate,
+        description: seedDraft.description,
+        assignee: seedDraft.assignee,
+        weight: seedDraft.weight,
+        actionItems: seedDraft.actionItems.map((item) => ({ ...item })),
+      }),
+      key: `bulk-${index}-${title.toLowerCase().replace(/\s+/g, "-")}`,
+      title,
+    };
+  });
+}
 
 function getPageKey(pathname: string): PageKey {
   if (pathname.startsWith("/member/")) return "home";
@@ -655,6 +770,32 @@ function FlowDeskIndex() {
     navigate("/today");
   };
 
+  const createTasks = (drafts: TaskDraft[]) => {
+    const createdAt = Date.now();
+    const nextTasks: AppTask[] = drafts
+      .filter((draft) => draft.title.trim())
+      .map((draft, index) => ({
+        id: `TSK-${String(createdAt + index).slice(-6)}`,
+        title: draft.title.trim(),
+        project: "Tasks",
+        owner: draft.assignee || "Myself",
+        ownerInitials: getOwnerInitials(draft.assignee || "Myself"),
+        due: formatTaskDueDate(draft.dueDate),
+        week: "This week",
+        status: "to-do",
+        priority: draft.priority,
+        progress: 0,
+        tags: [getTaskFieldLabel(draft.field, draft.customField), draft.fixed ? "Fixed" : "Unfixed"],
+      }));
+
+    if (nextTasks.length === 0) return;
+
+    setTasks((current) => [...nextTasks, ...current]);
+    setSelectedTaskId(nextTasks[0].id);
+    setAddTaskOpen(false);
+    navigate("/today");
+  };
+
   const page = {
     home: (
       <HomePage
@@ -705,7 +846,7 @@ function FlowDeskIndex() {
       <div className="min-h-screen w-full bg-background text-foreground">
         <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} items={availableNav} onNavigate={navigate} />
         <PullFromTotalDialog open={pullOpen} onOpenChange={setPullOpen} tasks={tasks.filter((task) => task.week !== "This week")} onPull={pullToToday} />
-        <AddTaskDialog open={addTaskOpen} onOpenChange={setAddTaskOpen} />
+        <AddTaskDialog open={addTaskOpen} onOpenChange={setAddTaskOpen} onCreateTasks={createTasks} />
         <div className="flex min-h-screen w-full bg-background">
           <AppSidebar role={role} setRole={setRole} notifications={notifications} />
           <SidebarInset className="bg-surface-strong">
@@ -929,7 +1070,7 @@ function CommandPalette({
         <CommandGroup heading="Quick actions">
           <CommandItem>
             <Plus className="mr-2 h-4 w-4" />
-            Create task placeholder
+            Create task
             <CommandShortcut>Demo</CommandShortcut>
           </CommandItem>
           <CommandItem>
@@ -1202,7 +1343,7 @@ function HomePage({
 
   const todayCompleted = todayTasks.filter((t) => t.status === "completed").length;
   const todayEmergency = todayTasks.filter((t) => t.status === "emergency").length;
-  const weeklyHighPriority = weeklyTasks.filter((t) => ["critical", "high"].includes(t.priority)).length;
+  const weeklyHighPriority = weeklyTasks.filter((t) => t.priority === "high").length;
 
   const surfaceCards = [
     {
@@ -1712,7 +1853,7 @@ function WeeklyPage({
         items={[
           { label: "This week", value: `${current.length}`, tone: "blue", helper: "Tasks assigned inside the current frame." },
           { label: "Carried over", value: `${carried.length}`, tone: "amber", helper: "Visible from previous weekly plans." },
-          { label: "High priority", value: `${tasks.filter((task) => ["critical", "high"].includes(task.priority)).length}`, tone: "red", helper: "Need attention during planning." },
+          { label: "High priority", value: `${tasks.filter((task) => task.priority === "high").length}`, tone: "red", helper: "Need attention during planning." },
           { label: "Ready today", value: `${current.filter((task) => task.progress > 40).length}`, tone: "emerald", helper: "Good candidates for today’s queue." },
         ]}
       />
@@ -2769,34 +2910,418 @@ function PullFromTotalDialog({
   );
 }
 
-function AddTaskDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function AddTaskDialog({
+  open,
+  onOpenChange,
+  onCreateTasks,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreateTasks: (drafts: TaskDraft[]) => void;
+}) {
+  const [bulkMode, setBulkMode] = useState(false);
+  const [singleDraft, setSingleDraft] = useState<TaskDraft>(() => createTaskDraft());
+  const [bulkInput, setBulkInput] = useState("");
+  const [bulkDrafts, setBulkDrafts] = useState<BulkTaskDraft[]>([]);
+
+  useEffect(() => {
+    if (!open) {
+      setBulkMode(false);
+      setSingleDraft(createTaskDraft());
+      setBulkInput("");
+      setBulkDrafts([]);
+    }
+  }, [open]);
+
+  const handleBulkInputChange = (value: string) => {
+    setBulkInput(value);
+    setBulkDrafts((current) => syncBulkTaskDrafts(value, current, singleDraft));
+  };
+
+  const updateBulkDraft = (key: string, nextDraft: TaskDraft) => {
+    setBulkDrafts((current) =>
+      current.map((draft) => (draft.key === key ? { ...draft, ...nextDraft, key: draft.key } : draft)),
+    );
+  };
+
+  const handleSubmit = () => {
+    const draftsToCreate = bulkMode
+      ? bulkDrafts.map(({ key: _key, ...draft }) => draft).filter((draft) => draft.title.trim())
+      : singleDraft.title.trim()
+        ? [singleDraft]
+        : [];
+
+    if (draftsToCreate.length === 0) return;
+
+    onCreateTasks(draftsToCreate);
+  };
+
+  const bulkCount = bulkDrafts.length;
+  const canSubmit = bulkMode ? bulkCount > 0 : Boolean(singleDraft.title.trim());
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-md border-border/70 bg-card">
-        <DialogHeader>
-          <DialogTitle>Add task</DialogTitle>
-          <DialogDescription>Frontend-only drawer replacement with backend-ready placeholders for fields and ownership.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 text-sm text-muted-foreground">
-          {[
-            "Task title",
-            "Owner and role",
-            "Priority and due date",
-            "Review / sign-off requirement",
-          ].map((item) => (
-            <div key={item} className="rounded-md border border-dashed border-border/70 bg-surface-soft p-3">
-              {item}
+      <DialogContent className="max-h-[92vh] max-w-4xl overflow-hidden rounded-[22px] border-border/70 bg-card p-0 shadow-2xl">
+        <div className="border-b border-border/70 px-6 py-4">
+          <DialogHeader className="space-y-3 text-left">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+                <CheckSquare className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-3">
+                  <DialogTitle className="text-xl font-semibold">New Task</DialogTitle>
+                </div>
+                <DialogDescription>Create a single task or switch into bulk mode to draft several tasks at once.</DialogDescription>
+              </div>
             </div>
-          ))}
+          </DialogHeader>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
+
+        <div className="max-h-[calc(92vh-152px)] space-y-5 overflow-y-auto px-6 py-5">
+          <Button
+            type="button"
+            variant={bulkMode ? "default" : "outline"}
+            className="gap-2 rounded-xl"
+            onClick={() => setBulkMode((current) => !current)}
+          >
+            <List className="h-4 w-4" />
+            {bulkMode ? "Bulk Mode ON" : "Create Multiple"}
           </Button>
-          <Button onClick={() => onOpenChange(false)}>Save placeholder</Button>
+
+          {bulkMode ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="bulk-task-input" className="text-sm font-medium text-foreground">
+                    Enter one task per line
+                  </Label>
+                  <span className="text-sm text-muted-foreground">{bulkCount} {bulkCount === 1 ? "task" : "tasks"} detected</span>
+                </div>
+                <Textarea
+                  id="bulk-task-input"
+                  value={bulkInput}
+                  onChange={(event) => handleBulkInputChange(event.target.value)}
+                  placeholder={"help the customer\nprepare the report\nreview open blockers"}
+                  className="min-h-[140px] resize-none rounded-2xl border-border bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/15"
+                />
+              </div>
+
+              {bulkDrafts.length > 0 ? (
+                <div className="rounded-2xl border border-border/70 bg-surface-soft/70 p-4">
+                  <div className="flex items-start justify-between gap-3 border-b border-border/70 pb-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">Editable Preview</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Each generated task keeps its own fields, due date, assignee, and action items.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-border/70 bg-card px-3 py-1 text-xs">
+                      {bulkCount} {bulkCount === 1 ? "task" : "tasks"}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 space-y-4">
+                    {bulkDrafts.map((draft, index) => (
+                      <TaskDraftEditor
+                        key={draft.key}
+                        draft={draft}
+                        index={index}
+                        onChange={(nextDraft) => updateBulkDraft(draft.key, nextDraft)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <TaskDraftEditor draft={singleDraft} onChange={setSingleDraft} />
+          )}
+        </div>
+
+        <DialogFooter className="border-t border-border/70 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit}>
+            Create Task
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TaskDraftEditor({
+  draft,
+  onChange,
+  index,
+}: {
+  draft: TaskDraft;
+  onChange: (draft: TaskDraft) => void;
+  index?: number;
+}) {
+  const [descriptionOpen, setDescriptionOpen] = useState(Boolean(draft.description));
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [actionItemsOpen, setActionItemsOpen] = useState(false);
+  const inputClassName =
+    "rounded-xl border-border bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/15";
+  const triggerClassName =
+    "rounded-xl border-border bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] focus:ring-2 focus:ring-primary/15";
+
+  const updateActionItem = (itemIndex: number, nextItem: TaskActionItemDraft) => {
+    onChange({
+      ...draft,
+      actionItems: draft.actionItems.map((item, currentIndex) => (currentIndex === itemIndex ? nextItem : item)),
+    });
+  };
+
+  const addActionItem = () => {
+    onChange({
+      ...draft,
+      actionItems: [...draft.actionItems, createActionItemDraft()],
+    });
+  };
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+      {typeof index === "number" ? (
+        <div className="mb-4 flex items-center gap-2">
+          <Badge variant="outline" className="rounded-full border-border/70 bg-background px-3 py-1 text-[11px]">
+            Task {index + 1}
+          </Badge>
+        </div>
+      ) : null}
+
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-base font-medium text-muted-foreground">Task title...</Label>
+          <Input
+            value={draft.title}
+            onChange={(event) => onChange({ ...draft, title: event.target.value })}
+            placeholder="Enter task title"
+            className={cn("h-12", inputClassName)}
+          />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Field</Label>
+            <Select value={draft.field} onValueChange={(value) => onChange({ ...draft, field: value, customField: value === "custom" ? draft.customField : "" })}>
+              <SelectTrigger className={cn("h-12", triggerClassName)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">Default</SelectItem>
+                <SelectItem value="project">Project</SelectItem>
+                <SelectItem value="training">Training</SelectItem>
+                <SelectItem value="compliance">Compliance</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Priority</Label>
+            <Select value={draft.priority} onValueChange={(value) => onChange({ ...draft, priority: value as Priority })}>
+              <SelectTrigger className={cn("h-12", triggerClassName)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Due date</Label>
+            <Input
+              type="date"
+              value={draft.dueDate}
+              onChange={(event) => onChange({ ...draft, dueDate: event.target.value })}
+              className={cn("h-12", inputClassName)}
+            />
+          </div>
+
+          <div className="rounded-xl border border-border bg-white px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Task type</Label>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className={cn("text-sm font-medium transition-colors", draft.fixed ? "text-foreground" : "text-muted-foreground")}>Fixed</span>
+              <Switch
+                checked={draft.fixed}
+                onCheckedChange={(checked) => onChange({ ...draft, fixed: checked })}
+                aria-label="Toggle task fixed state"
+              />
+              <span className={cn("text-sm font-medium transition-colors", !draft.fixed ? "text-foreground" : "text-muted-foreground")}>Unfixed</span>
+            </div>
+          </div>
+        </div>
+
+        {draft.field === "custom" ? (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Custom field</Label>
+            <Input
+              value={draft.customField}
+              onChange={(event) => onChange({ ...draft, customField: event.target.value })}
+              placeholder="Enter a custom field"
+              className={cn("h-12", inputClassName)}
+            />
+          </div>
+        ) : null}
+
+        <div className="space-y-3 border-t border-border/70 pt-3">
+          <Collapsible open={descriptionOpen} onOpenChange={setDescriptionOpen}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between rounded-xl px-1 py-2 text-left transition-colors hover:text-foreground">
+                <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <AlignLeft className="h-4 w-4" />
+                  Add description
+                </span>
+                <Plus className={cn("h-4 w-4 text-muted-foreground transition-transform", descriptionOpen && "rotate-45")} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="rounded-2xl border border-border/70 bg-surface-soft/60 p-4">
+                <Textarea
+                  value={draft.description}
+                  onChange={(event) => onChange({ ...draft, description: event.target.value })}
+                  placeholder="Describe the objective..."
+                  className={cn("min-h-[120px] resize-none", inputClassName)}
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible open={assignmentOpen} onOpenChange={setAssignmentOpen}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between rounded-xl px-1 py-2 text-left transition-colors hover:text-foreground">
+                <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Change assignment &amp; weight
+                </span>
+                <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", assignmentOpen && "rotate-90")} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="grid gap-3 rounded-2xl border border-border/70 bg-surface-soft/60 p-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Assign to</Label>
+                  <Select value={draft.assignee} onValueChange={(value) => onChange({ ...draft, assignee: value })}>
+                    <SelectTrigger className={cn("h-11", triggerClassName)}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Myself">Myself</SelectItem>
+                      <SelectItem value="Maya Chen">Maya Chen</SelectItem>
+                      <SelectItem value="Jon Park">Jon Park</SelectItem>
+                      <SelectItem value="Sara Ali">Sara Ali</SelectItem>
+                      <SelectItem value="Leo Grant">Leo Grant</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Weight (%)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={draft.weight}
+                    onChange={(event) => onChange({ ...draft, weight: event.target.value })}
+                    className={cn("h-11", inputClassName)}
+                  />
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible open={actionItemsOpen} onOpenChange={setActionItemsOpen}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between rounded-xl px-1 py-2 text-left transition-colors hover:text-foreground">
+                <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <CheckSquare className="h-4 w-4" />
+                  Add action items
+                </span>
+                <Plus className={cn("h-4 w-4 text-muted-foreground transition-transform", actionItemsOpen && "rotate-45")} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="rounded-2xl border border-border/70 bg-surface-soft/60 p-4">
+                <div className="space-y-4">
+                  {draft.actionItems.map((item, itemIndex) => (
+                    <div key={`${itemIndex}-${item.title}`} className="space-y-3 rounded-xl border border-border/70 bg-background p-3">
+                      <Input
+                        value={item.title}
+                        onChange={(event) => updateActionItem(itemIndex, { ...item, title: event.target.value })}
+                        placeholder="Action item description"
+                        className={cn("h-10", inputClassName)}
+                      />
+                      <Textarea
+                        value={item.description}
+                        onChange={(event) => updateActionItem(itemIndex, { ...item, description: event.target.value })}
+                        placeholder="Description (optional)"
+                        className={cn("min-h-[88px] resize-none", inputClassName)}
+                      />
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Select value={item.assignee} onValueChange={(value) => updateActionItem(itemIndex, { ...item, assignee: value })}>
+                          <SelectTrigger className={cn("h-10", triggerClassName)}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Myself">Myself</SelectItem>
+                            <SelectItem value="Maya Chen">Maya Chen</SelectItem>
+                            <SelectItem value="Jon Park">Jon Park</SelectItem>
+                            <SelectItem value="Sara Ali">Sara Ali</SelectItem>
+                            <SelectItem value="Leo Grant">Leo Grant</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="date"
+                          value={item.dueDate}
+                          onChange={(event) => updateActionItem(itemIndex, { ...item, dueDate: event.target.value })}
+                          className={cn("h-10", inputClassName)}
+                        />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-[1.1fr_1fr]">
+                        <div className="rounded-xl border border-border/70 bg-surface-soft/70 px-3 py-2.5">
+                          <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Task type</span>
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <span className={cn("text-sm font-medium transition-colors", item.fixed ? "text-foreground" : "text-muted-foreground")}>Fixed</span>
+                            <Switch
+                              checked={item.fixed}
+                              onCheckedChange={(checked) => updateActionItem(itemIndex, { ...item, fixed: checked })}
+                              aria-label="Toggle action item fixed state"
+                            />
+                            <span className={cn("text-sm font-medium transition-colors", !item.fixed ? "text-foreground" : "text-muted-foreground")}>Unfixed</span>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-border bg-white px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                          <Label className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Priority</Label>
+                          <Select value={item.priority} onValueChange={(value) => updateActionItem(itemIndex, { ...item, priority: value as Priority })}>
+                            <SelectTrigger className={cn("mt-3 h-11", triggerClassName)}>
+                              <SelectValue placeholder="Priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="high">High</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="low">Low</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <Button type="button" variant="outline" className="rounded-xl" onClick={addActionItem}>
+                    Add
+                  </Button>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
+      </div>
+    </div>
   );
 }
 
